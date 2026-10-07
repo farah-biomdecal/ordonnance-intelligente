@@ -4,8 +4,9 @@ import qrcode
 import io
 import base64
 
+from database import creer_base
 app = Flask(__name__)
-
+creer_base()
 
 @app.route("/")
 def accueil():
@@ -888,54 +889,27 @@ def voir_qr():
     </html>
     """
 
-@app.route("/qr/<int:ordonnance_id>")
-def qr_ordonnance(ordonnance_id):
-
-    url = request.host_url + "ordonnance/" + str(ordonnance_id)
-
-
-
-    qr = qrcode.QRCode(
-        version=1,
-        box_size=10,
-        border=4
-    )
-
-    qr.add_data(url)
-    qr.make(fit=True)
-
-    image = qr.make_image()
-
-    buffer = io.BytesIO()
-    image.save(buffer, format="PNG")
-
-    image_base64 = base64.b64encode(
-        buffer.getvalue()
-    ).decode("utf-8")
-
-    return f"""
-    <div style="text-align:center; margin-top:50px;">
-        <h1>QR Code de l'ordonnance #{ordonnance_id}</h1>
-
-        <img src="data:image/png;base64,{image_base64}"
-             width="300">
-
-        <p>Scannez ce QR Code pour accéder à l'ordonnance.</p>
-    </div>
-    """
 @app.route("/ordonnance/<int:ordonnance_id>")
 def afficher_ordonnance(ordonnance_id):
 
     connexion = sqlite3.connect("ordonnance.db")
     curseur = connexion.cursor()
 
+    # =========================================================
+    # INFORMATIONS PATIENT + MEDECIN
+    # =========================================================
+
     curseur.execute("""
         SELECT
             ordonnances.id,
+            patients.numero,
             patients.nom,
             patients.prenom,
+            patients.date_naissance,
             medecins.nom,
-            medecins.specialite
+            medecins.specialite,
+            medecins.telephone,
+            medecins.etablissement
         FROM ordonnances
         JOIN patients
             ON ordonnances.numero_patient = patients.numero
@@ -950,92 +924,1069 @@ def afficher_ordonnance(ordonnance_id):
         connexion.close()
         return "Ordonnance introuvable"
 
+    # =========================================================
+    # MEDICAMENTS
+    # =========================================================
+
     curseur.execute("""
-        SELECT nom, dosage, posologie, duree, instructions
+        SELECT
+            nom,
+            dosage,
+            posologie,
+            duree,
+            instructions
         FROM medicaments
         WHERE ordonnance_id = ?
     """, (ordonnance_id,))
 
     medicaments = curseur.fetchall()
+
     connexion.close()
 
-    liste = ""
+    # =========================================================
+    # DATE
+    # =========================================================
 
-    for medicament in medicaments:
-        liste += f"""
-        <div style="
-            background:#f1f7ff;
-            padding:15px;
-            margin:15px 0;
-            border-left:5px solid #1f3c88;
-            border-radius:10px;
-        ">
-            <h3>💊 {medicament[0]}</h3>
-            <p><strong>Dosage :</strong> {medicament[1] or "Non précisé"}</p>
-            <p><strong>Posologie :</strong> {medicament[2] or "Non précisée"}</p>
-            <p><strong>Durée :</strong> {medicament[3] or "Non précisée"}</p>
-            <p><strong>Instructions :</strong> {medicament[4] or "Aucune"}</p>
+    from datetime import datetime
+
+    date_prescription = datetime.now().strftime("%d/%m/%Y")
+
+    # Pour le projet universitaire :
+    validite = "30 jours"
+
+    # =========================================================
+    # LISTE DES MEDICAMENTS
+    # =========================================================
+
+    liste_medicaments = ""
+
+    for i, medicament in enumerate(medicaments, start=1):
+
+        nom = medicament[0] or "Non précisé"
+        dosage = medicament[1] or "Non précisé"
+        posologie = medicament[2] or "Non précisée"
+        duree = medicament[3] or "Non précisée"
+        instructions = medicament[4] or "Aucune"
+
+        liste_medicaments += f"""
+        
+        <div class="medicament">
+
+            <div class="numero">
+                {i}
+            </div>
+
+            <div class="medicament-content">
+
+                <h3>
+                    {nom}
+                </h3>
+
+                <div class="medicament-infos">
+
+                    <div>
+                        <span>Dosage</span>
+                        <strong>{dosage}</strong>
+                    </div>
+
+                    <div>
+                        <span>Posologie</span>
+                        <strong>{posologie}</strong>
+                    </div>
+
+                    <div>
+                        <span>Durée</span>
+                        <strong>{duree}</strong>
+                    </div>
+
+                </div>
+
+                <div class="instructions">
+
+                    <strong>
+                        Instructions :
+                    </strong>
+
+                    {instructions}
+
+                </div>
+
+            </div>
+
         </div>
         """
 
+    # =========================================================
+    # QR CODE
+    # =========================================================
+
+    url = request.host_url.rstrip("/") + \
+          "/ordonnance/" + str(ordonnance_id)
+
+    qr = qrcode.QRCode(
+        version=1,
+        box_size=8,
+        border=4
+    )
+
+    qr.add_data(url)
+    qr.make(fit=True)
+
+    image = qr.make_image()
+
+    buffer = io.BytesIO()
+
+    image.save(
+        buffer,
+        format="PNG"
+    )
+
+    image_base64 = base64.b64encode(
+        buffer.getvalue()
+    ).decode("utf-8")
+
+    # =========================================================
+    # PAGE
+    # =========================================================
+
     return f"""
-    <!DOCTYPE html>
-    <html lang="fr">
-    <head>
-        <meta charset="UTF-8">
-        <title>Ordonnance #{ordonnance[0]}</title>
-    </head>
+<!DOCTYPE html>
 
-    <body style="
-        font-family:Arial;
-        background:#f4f7fb;
-        padding:30px;
-    ">
+<html lang="fr">
 
-        <div style="
-            max-width:700px;
-            margin:auto;
-            background:white;
-            padding:30px;
-            border-radius:15px;
-        ">
+<head>
 
-            <h1>📋 Ordonnance médicale #{ordonnance[0]}</h1>
+<meta charset="UTF-8">
 
-            <p>
-                <strong>Patient :</strong>
-                {ordonnance[1]} {ordonnance[2]}
-            </p>
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
 
-            <p>
-                <strong>Médecin :</strong>
-                Dr {ordonnance[3]}
-            </p>
+<title>
+    Ordonnance médicale #{ordonnance[0]}
+</title>
 
-            <p>
-                <strong>Spécialité :</strong>
-                {ordonnance[4]}
-            </p>
+<style>
 
-            <hr>
+/* =========================================================
+   GENERAL
+========================================================= */
 
-            <h2>💊 Médicaments</h2>
+* {{
+    box-sizing: border-box;
+}}
 
-            {liste}
+body {{
+
+    margin: 0;
+
+    padding: 30px;
+
+    background: #eef2f5;
+
+    font-family: Arial, Helvetica, sans-serif;
+
+    color: #222;
+}}
+
+
+/* =========================================================
+   FEUILLE
+========================================================= */
+
+.ordonnance {{
+
+    max-width: 900px;
+
+    min-height: 1100px;
+
+    margin: auto;
+
+    background: white;
+
+    box-shadow:
+        0 6px 25px
+        rgba(0,0,0,0.12);
+
+    position: relative;
+}}
+
+
+/* =========================================================
+   HEADER
+========================================================= */
+
+.header {{
+
+    padding: 35px 40px 25px;
+
+    border-bottom:
+        3px solid #1f5f8b;
+}}
+
+.header-top {{
+
+    display: grid;
+
+    grid-template-columns: 1fr 1fr;
+
+    gap: 40px;
+}}
+
+
+/* =========================================================
+   PATIENT - GAUCHE
+========================================================= */
+
+.patient {{
+
+    text-align: left;
+
+    border-right:
+        1px solid #ddd;
+
+    padding-right: 30px;
+}}
+
+.patient-title {{
+
+    color: #1f5f8b;
+
+    font-size: 17px;
+
+    font-weight: bold;
+
+    margin-bottom: 12px;
+
+    text-transform: uppercase;
+}}
+
+.patient-name {{
+
+    font-size: 21px;
+
+    font-weight: bold;
+
+    margin: 8px 0 15px;
+
+    color: #222;
+}}
+
+.patient p {{
+
+    margin: 7px 0;
+
+    font-size: 14px;
+
+    color: #555;
+}}
+
+
+/* =========================================================
+   MEDECIN - DROITE
+========================================================= */
+
+.medecin {{
+
+    text-align: right;
+
+    padding-left: 30px;
+}}
+
+.medecin h1 {{
+
+    margin: 0 0 8px;
+
+    font-size: 24px;
+
+    color: #174a6b;
+}}
+
+.specialite {{
+
+    font-weight: bold;
+
+    font-size: 15px;
+
+    margin-bottom: 14px;
+
+    color: #444;
+}}
+
+.medecin p {{
+
+    margin: 7px 0;
+
+    font-size: 14px;
+
+    color: #555;
+}}
+
+
+/* =========================================================
+   NUMERO + DATE
+========================================================= */
+
+.informations-ordonnance {{
+
+    margin-top: 25px;
+
+    padding-top: 15px;
+
+    border-top:
+        1px solid #ddd;
+
+    display: flex;
+
+    justify-content:
+        space-between;
+
+    font-size: 14px;
+
+    color: #555;
+}}
+
+.informations-ordonnance strong {{
+
+    color: #174a6b;
+}}
+
+
+/* =========================================================
+   TITRE
+========================================================= */
+
+.titre {{
+
+    text-align: center;
+
+    padding: 30px 20px 15px;
+}}
+
+.titre h2 {{
+
+    margin: 0;
+
+    color: #174a6b;
+font-size: 30px;
+
+    letter-spacing: 2px;
+}}
+
+.titre-line {{
+
+    width: 80px;
+
+    height: 3px;
+
+    background: #174a6b;
+
+    margin: 12px auto;
+}}
+
+
+/* =========================================================
+   TRAITEMENT
+========================================================= */
+
+.traitement {{
+
+    padding: 10px 40px 30px;
+}}
+
+.traitement-title {{
+
+    font-size: 19px;
+
+    font-weight: bold;
+
+    color: #174a6b;
+
+    border-bottom:
+        1px solid #ddd;
+
+    padding-bottom: 12px;
+
+    margin-bottom: 20px;
+}}
+
+
+/* =========================================================
+   MEDICAMENT
+========================================================= */
+
+.medicament {{
+
+    display: flex;
+
+    gap: 15px;
+
+    padding: 18px;
+
+    margin-bottom: 15px;
+
+    background: #fafcfd;
+
+    border-left:
+        5px solid #1f5f8b;
+
+    border-radius: 8px;
+}}
+
+.numero {{
+
+    width: 34px;
+
+    height: 34px;
+
+    min-width: 34px;
+
+    border-radius: 50%;
+
+    background: #1f5f8b;
+
+    color: white;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+
+    font-weight: bold;
+}}
+
+.medicament-content {{
+
+    flex: 1;
+}}
+
+.medicament-content h3 {{
+
+    margin: 0 0 15px;
+
+    color: #222;
+
+    font-size: 19px;
+}}
+
+.medicament-infos {{
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(3, 1fr);
+
+    gap: 12px;
+}}
+
+.medicament-infos div {{
+
+    background: white;
+
+    padding: 10px;
+
+    border-radius: 7px;
+
+    border:
+        1px solid #e2e7eb;
+}}
+
+.medicament-infos span {{
+
+    display: block;
+
+    font-size: 12px;
+
+    color: #777;
+
+    margin-bottom: 5px;
+}}
+
+.medicament-infos strong {{
+
+    font-size: 14px;
+
+    color: #333;
+}}
+
+.instructions {{
+
+    margin-top: 12px;
+
+    padding-top: 10px;
+
+    border-top:
+        1px dashed #ccc;
+
+    font-size: 13px;
+
+    color: #555;
+}}
+
+
+/* =========================================================
+   SIGNATURE + CACHET
+========================================================= */
+
+.signature-zone {{
+
+    display: flex;
+
+    justify-content:
+        flex-end;
+
+    align-items:
+        flex-start;
+
+    gap: 70px;
+
+    padding:
+        35px 40px;
+}}
+
+.signature {{
+
+    width: 220px;
+
+    text-align: center;
+}}
+
+.signature h3 {{
+
+    font-size: 15px;
+
+    color: #444;
+
+    margin-bottom: 50px;
+}}
+
+.signature-line {{
+
+    border-top:
+        1px solid #555;
+
+    padding-top: 8px;
+
+    font-size: 12px;
+
+    color: #777;
+}}
+
+
+/* =========================================================
+   CACHET
+========================================================= */
+
+.cachet {{
+
+    width: 190px;
+
+    height: 110px;
+
+    border:
+        3px solid #2878bd;
+
+    border-radius: 12px;
+
+    display: flex;
+
+    flex-direction: column;
+
+    justify-content: center;
+
+    align-items: center;
+
+    text-align: center;
+
+    color: #2878bd;
+
+    transform:
+        rotate(-2deg);
+}}
+
+.cachet strong {{
+
+    font-size: 16px;
+}}
+
+.cachet span {{
+
+    font-size: 11px;
+
+    margin-top: 4px;
+}}
+
+.cachet small {{
+
+    font-size: 7px;
+
+    margin-top: 8px;
+
+    font-weight: bold;
+}}
+
+
+/* =========================================================
+   QR
+========================================================= */
+
+.qr-zone {{
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content:
+        space-between;
+
+    gap: 30px;
+
+    border-top:
+        1px solid #ddd;
+
+    padding:
+        25px 40px;
+}}
+
+.qr-text {{
+
+    flex: 1;
+}}
+
+.qr-text h3 {{
+
+    color: #174a6b;
+
+    margin-top: 0;
+}}
+
+.qr-text p {{
+
+    font-size: 13px;
+
+    color: #666;
+
+    line-height: 1.5;
+}}
+
+.qr-zone img {{
+
+    width: 150px;
+
+    height: 150px;
+}}
+
+
+/* =========================================================
+   FOOTER
+========================================================= */
+
+.footer {{
+
+    text-align: center;
+
+    border-top:
+        1px solid #ddd;
+
+    padding: 15px;
+
+    font-size: 11px;
+
+    color: #777;
+}}
+
+
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+.buttons {{
+
+    max-width: 900px;
+
+    margin: 20px auto;
+
+    text-align: center;
+}}
+
+.btn {{
+
+    display: inline-block;
+
+    padding:
+        12px 22px;
+
+    margin: 5px;
+
+    border-radius: 8px;
+
+    text-decoration: none;
+
+    font-weight: bold;
+
+    border: none;
+
+    cursor: pointer;
+}}
+
+.btn-print {{
+
+    background: #1f5f8b;
+
+    color: white;
+}}
+
+.btn-home {{
+
+    background: #e5edf2;
+
+    color: #174a6b;
+}}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 700px) {{
+
+    body {{
+        padding: 8px;
+    }}
+
+    .header-top {{
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }}
+
+    .patient {{
+        border-right: none;
+        border-bottom:
+            1px solid #ddd;
+        padding-right: 0;
+        padding-bottom: 20px;
+    }}
+
+    .medecin {{
+        text-align: left;
+        padding-left: 0;
+    }}
+
+    .informations-ordonnance {{
+        flex-direction: column;
+        gap: 8px;
+    }}
+
+    .traitement {{
+        padding: 10px 20px 25px;
+    }}
+
+    .medicament-infos {{
+        grid-template-columns: 1fr;
+    }}
+
+    .signature-zone {{
+        flex-direction: column;
+        align-items: center;
+        gap: 35px;
+    }}
+
+    .qr-zone {{
+        flex-direction: column;
+        text-align: center;
+    }}
+
+}}
+
+
+/* =========================================================
+   IMPRESSION
+========================================================= */
+
+@media print {{
+
+    body {{
+        background: white;
+        padding: 0;
+    }}
+
+    .ordonnance {{
+        box-shadow: none;
+        max-width: none;
+    }}
+
+    .buttons {{
+        display: none;
+    }}
+
+}}
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<!--
+
+   
+ORDONNANCE
+===================================================== -->
+
+<div class="ordonnance">
+
+
+    <!-- HEADER -->
+
+    <div class="header">
+
+        <div class="header-top">
+
+
+            <!-- PATIENT A GAUCHE -->
+
+            <div class="patient">
+
+                <div class="patient-title">
+                    Patient
+                </div>
+
+                <div class="patient-name">
+                    {ordonnance[2]} {ordonnance[3]}
+                </div>
+
+                <p>
+                    <strong>N° patient :</strong>
+                    {ordonnance[1]}
+                </p>
+
+                <p>
+                    <strong>Date de naissance :</strong>
+                    {ordonnance[4] or "Non précisée"}
+                </p>
+
+            </div>
+
+
+            <!-- MEDECIN A DROITE -->
+
+            <div class="medecin">
+
+                <h1>
+                    Dr {ordonnance[5]}
+                </h1>
+
+                <div class="specialite">
+                    {ordonnance[6] or "Médecin"}
+                </div>
+
+                <p>
+                    <strong>Établissement :</strong>
+                    {ordonnance[8] or "Non précisé"}
+                </p>
+
+                <p>
+                    <strong>Téléphone :</strong>
+                    {ordonnance[7] or "Non précisé"}
+                </p>
+
+            </div>
 
         </div>
 
-    </body>
-    </html>
-    """
 
+        <!-- DATE + NUMERO -->
+
+        <div class="informations-ordonnance">
+
+            <div>
+
+                <strong>
+                    Ordonnance N° :
+                </strong>
+
+                {ordonnance[0]}
+
+            </div>
+
+            <div>
+
+                <strong>
+                    Date de prescription :
+                </strong>
+
+                {date_prescription}
+
+            </div>
+
+            <div>
+
+                <strong>
+                    Validité :
+                </strong>
+
+                {validite}
+
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <!-- TITRE -->
+
+    <div class="titre">
+
+        <h2>
+            ORDONNANCE
+        </h2>
+
+        <div class="titre-line"></div>
+
+    </div>
+
+
+    <!-- TRAITEMENT -->
+
+    <div class="traitement">
+
+        <div class="traitement-title">
+            Traitement prescrit
+        </div>
+
+        {liste_medicaments}
+
+    </div>
+
+
+    <!-- SIGNATURE + CACHET -->
+
+    <div class="signature-zone">
+
+
+        <div class="signature">
+
+            <h3>
+                Signature du médecin
+            </h3>
+
+            <div class="signature-line">
+                Dr {ordonnance[5]}
+            </div>
+
+        </div>
+
+
+        <div class="cachet">
+
+            <strong>
+                DR {ordonnance[5]}
+            </strong>
+
+            <span>
+                {ordonnance[6] or "Médecin"}
+            </span>
+
+            <span>
+                {ordonnance[8] or "Établissement"}
+            </span>
+
+            <small>
+                DOCUMENT DE DÉMONSTRATION
+            </small>
+
+        </div>
+
+    </div>
+
+
+    <!-- QR CODE -->
+
+    <div class="qr-zone">
+
+        <div class="qr-text">
+
+            <h3>
+                Vérification numérique
+            </h3>
+
+            <p>
+                Scannez le QR Code pour accéder
+                à la version numérique de cette
+                ordonnance.
+            </p>
+
+            <p>
+                <strong>
+                    Ordonnance médicale intelligente
+                </strong>
+            </p>
+
+        </div>
+
+        <img
+            src="data:image/png;base64,{image_base64}"
+            alt="QR Code"
+        >
+
+    </div>
+
+
+    <!-- FOOTER -->
+
+    <div class="footer">
+
+        Ordonnance médicale intelligente
+        — Projet universitaire
+        — Document de démonstration
+
+    </div>
+
+
+</div>
+
+
+<!-- BUTTONS -->
+
+<div class="buttons">
+
+    <button
+        class="btn btn-print"
+        onclick="window.print()">
+
+        🖨️ Imprimer l'ordonnance
+
+    </button>
+
+
+    <a
+        href="/"
+        class="btn btn-home">
+
+        ← Retour à l'accueil
+
+    </a>
+
+</div>
+
+
+</body>
+
+</html>
+"""
 @app.route("/ordonnances")
 def voir_ordonnances():
 
     connexion = sqlite3.connect("ordonnance.db")
     curseur = connexion.cursor()
 
-    # Récupérer les ordonnances
+    # =====================================================
+    # RECUPERER LES ORDONNANCES
+    # =====================================================
+
     curseur.execute("""
         SELECT
             ordonnances.id,
@@ -1055,11 +2006,15 @@ def voir_ordonnances():
 
     lignes = ""
 
+    # =====================================================
+    # AFFICHER CHAQUE ORDONNANCE
+    # =====================================================
+
     for ordonnance in ordonnances:
 
         ordonnance_id = ordonnance[0]
 
-        # Récupérer tous les médicaments de cette ordonnance
+        # Recuperer les medicaments
         curseur.execute("""
             SELECT
                 nom,
@@ -1076,150 +2031,525 @@ def voir_ordonnances():
         liste_medicaments = ""
 
         for medicament in medicaments:
+
+            nom = medicament[0] or "Non précisé"
+            dosage = medicament[1] or "Non précisé"
+            posologie = medicament[2] or "Non précisée"
+            duree = medicament[3] or "Non précisée"
+            instructions = medicament[4] or "Aucune"
+
             liste_medicaments += f"""
             <div class="medicament">
-                <h3>💊 {medicament[0]}</h3>
 
-                <p><strong>Dosage :</strong>
-                {medicament[1] or "Non précisé"}</p>
+                <h3>
+                    💊 {nom}
+                </h3>
 
-                <p><strong>Posologie :</strong>
-                {medicament[2] or "Non précisée"}</p>
+                <p>
+                    <strong>Dosage :</strong>
+                    {dosage}
+                </p>
 
-                <p><strong>Durée :</strong>
-                {medicament[3] or "Non précisée"}</p>
+                <p>
+                    <strong>Posologie :</strong>
+                    {posologie}
+                </p>
 
-                <p><strong>Instructions :</strong>
-                {medicament[4] or "Aucune"}</p>
+                <p>
+                    <strong>Durée :</strong>
+                    {duree}
+                </p>
+
+                <p>
+                    <strong>Instructions :</strong>
+                    {instructions}
+                </p>
+
             </div>
             """
+
+        # =================================================
+        # CARTE DE L'ORDONNANCE
+        # =================================================
 
         lignes += f"""
         <div class="card">
 
-            <h2>Ordonnance #{ordonnance[0]}</h2>
+            <div class="card-header">
 
-            <p>
-                <strong>Patient :</strong>
-                {ordonnance[1]} {ordonnance[2]}
-            </p>
+                <h2>
+                    Ordonnance #{ordonnance[0]}
+                </h2>
 
-            <p>
-                <strong>Médecin :</strong>
-                Dr {ordonnance[3]}
-            </p>
+            </div>
 
-            <p>
-                <strong>Spécialité :</strong>
-                {ordonnance[4]}
-            </p>
+            <div class="patient">
+
+                <p>
+                    <strong>Patient :</strong>
+                    {ordonnance[1]} {ordonnance[2]}
+                </p>
+
+            </div>
+
+            <div class="medecin">
+
+                <p>
+                    <strong>Médecin :</strong>
+                    Dr {ordonnance[3]}
+                </p>
+
+                <p>
+                    <strong>Spécialité :</strong>
+                    {ordonnance[4]}
+                </p>
+
+            </div>
 
             <hr>
 
-            <h2>💊 Médicaments</h2>
+            <h2 class="titre-medicaments">
+                💊 Médicaments
+            </h2>
 
             {liste_medicaments}
-<a href="/qr/{ordonnance[0]}"
-   style="
-       display:inline-block;
-       margin-top:15px;
-       padding:12px 20px;
-       background:#1f3c88;
-       color:white;
-       text-decoration:none;
-       border-radius:8px;
-   ">
-   🔳 Voir le QR Code
-</a>
+
+            <div class="actions">
+
+                <a
+                    href="/ordonnance/{ordonnance[0]}"
+                    class="btn btn-voir">
+
+                    📋 Voir l'ordonnance
+
+                </a>
+
+                <a
+                    href="/qr/{ordonnance[0]}"
+                    class="btn btn-qr">
+
+                    🔳 Voir le QR Code
+
+                </a>
+
+            </div>
+
         </div>
         """
 
     connexion.close()
 
+    # =====================================================
+    # SI AUCUNE ORDONNANCE
+    # =====================================================
+
     if not lignes:
+
         lignes = """
-        <p class="vide">
-            Aucune ordonnance enregistrée.
-        </p>
+        <div class="vide">
+
+            <p>
+                Aucune ordonnance enregistrée.
+            </p>
+
+        </div>
         """
+
+    # =====================================================
+    # PAGE HTML
+    # =====================================================
+
+    return f"""
+<!DOCTYPE html>
+
+<html lang="fr">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>
+    Ordonnances médicales
+</title>
+
+<style>
+
+* {{
+    box-sizing: border-box;
+}}
+
+body {{
+
+    margin: 0;
+
+    padding: 30px;
+
+    font-family: Arial, sans-serif;
+
+    background: #eef4f9;
+
+    color: #183153;
+}}
+
+
+/* =====================================================
+   TITRE
+===================================================== */
+
+h1 {{
+
+    text-align: center;
+
+    color: #174a6b;
+
+    margin-bottom: 35px;
+}}
+
+
+/* =====================================================
+   CARTE
+===================================================== */
+
+.card {{
+
+    max-width: 800px;
+
+    margin: 25px auto;
+
+    background: white;
+
+    padding: 28px;
+
+    border-radius: 15px;
+
+    box-shadow:
+        0 5px 20px
+        rgba(0,0,0,0.08);
+}}
+
+
+/* =====================================================
+   HEADER
+===================================================== */
+
+.card-header {{
+
+    border-bottom:
+        2px solid #1f5f8b;
+
+    margin-bottom: 20px;
+
+    padding-bottom: 10px;
+}}
+
+.card-header h2 {{
+
+    margin: 0;
+
+    color: #174a6b;
+}}
+
+
+/* =====================================================
+   INFORMATIONS
+===================================================== */
+
+.patient,
+.medecin {{
+
+    margin: 10px 0;
+}}
+
+.patient p,
+.medecin p {{
+
+    margin: 7px 0;
+
+    font-size: 15px;
+}}
+
+
+/* =====================================================
+   MEDICAMENTS
+===================================================== */
+
+.titre-medicaments {{
+
+    color: #174a6b;
+
+    font-size: 20px;
+
+    margin-bottom: 15px;
+}}
+
+.medicament {{
+
+    background: #f4f9fd;
+
+    border-left:
+        5px solid #1f5f8b;
+
+    padding: 16px;
+
+    margin: 15px 0;
+
+    border-radius: 10px;
+}}
+
+.medicament h3 {{
+
+    margin-top: 0;
+
+    color: #174a6b;
+}}
+
+.medicament p {{
+
+    margin: 7px 0;
+
+    color: #444;
+}}
+
+
+/* =====================================================
+   BOUTONS
+===================================================== */
+
+.actions {{
+
+    margin-top: 20px;
+
+    display: flex;
+
+    gap: 10px;
+
+    flex-wrap: wrap;
+}}
+
+.btn {{
+
+    display: inline-block;
+
+    padding:
+        12px 18px;
+
+    border-radius: 8px;
+
+    text-decoration: none;
+
+    font-weight: bold;
+}}
+
+.btn-voir {{
+
+    background: #1f5f8b;
+
+    color: white;
+}}
+
+.btn-qr {{
+
+    background: #e7f0f6;
+
+    color: #174a6b;
+}}
+
+
+/* =====================================================
+   AUCUNE ORDONNANCE
+===================================================== */
+
+.vide {{
+
+    max-width: 600px;
+
+    margin: 50px auto;
+
+    background: white;
+
+    padding: 30px;
+
+    text-align: center;
+
+    border-radius: 15px;
+
+    color: #666;
+}}
+
+
+/* =====================================================
+   RETOUR
+===================================================== */
+
+.retour {{
+
+    display: block;
+
+    width: 220px;
+
+    margin: 35px auto;
+
+    padding: 12px;
+
+    text-align: center;
+
+    background: #174a6b;
+
+    color: white;
+
+    text-decoration: none;
+
+    border-radius: 8px;
+}}
+
+
+/* =====================================================
+   MOBILE
+===================================================== */
+
+@media (max-width: 600px) {{
+
+    body {{
+        padding: 10px;
+    }}
+
+    .card {{
+        padding: 20px;
+    }}
+
+    .actions {{
+        flex-direction: column;
+    }}
+
+    .btn {{
+        text-align: center;
+    }}
+
+}}
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<h1>
+    📋 Ordonnances médicales
+</h1>
+
+
+{lignes}
+
+
+<a
+    href="/"
+    class="retour">
+
+    ← Retour à l'accueil
+
+</a>
+
+
+</body>
+
+</html>
+"""
+@app.route("/qr/<int:ordonnance_id>")
+def qr_ordonnance(ordonnance_id):
+
+    # إنشاء رابط الوصفة
+    url = request.host_url.rstrip("/") + "/ordonnance/" + str(ordonnance_id)
+
+    # إنشاء QR Code
+    qr = qrcode.QRCode(
+        version=1,
+        box_size=10,
+        border=4
+    )
+
+    qr.add_data(url)
+    qr.make(fit=True)
+
+    image = qr.make_image()
+
+    # تحويل الصورة إلى Base64
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    image_base64 = base64.b64encode(
+        buffer.getvalue()
+    ).decode("utf-8")
 
     return f"""
     <!DOCTYPE html>
+
     <html lang="fr">
 
     <head>
 
         <meta charset="UTF-8">
 
-        <title>Ordonnances</title>
+        <meta name="viewport"
+              content="width=device-width, initial-scale=1.0">
+
+        <title>
+            QR Code - Ordonnance #{ordonnance_id}
+        </title>
 
         <style>
 
             body {{
-                font-family: Arial, sans-serif;
-                background: #f4f7fb;
                 margin: 0;
                 padding: 30px;
+                font-family: Arial, sans-serif;
+                background: #eef4f9;
+                color: #183153;
+            }}
+
+            .container {{
+                max-width: 650px;
+                margin: 50px auto;
+                background: white;
+                padding: 40px;
+                border-radius: 20px;
+                text-align: center;
+                box-shadow: 0 8px 25px rgba(0,0,0,0.10);
             }}
 
             h1 {{
-                text-align: center;
-                color: #1f3c88;
-                margin-bottom: 30px;
+                color: #174a6b;
+                margin-bottom: 25px;
             }}
 
-            .card {{
-                background: white;
-                max-width: 750px;
-                margin: 20px auto;
-                padding: 25px;
-                border-radius: 15px;
-                box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            img {{
+                width: 300px;
+                height: 300px;
+                margin: 20px;
             }}
 
-            .card h2 {{
-                color: #1f3c88;
-            }}
-
-            .card p {{
+            p {{
+                color: #607789;
                 font-size: 16px;
-                line-height: 1.6;
             }}
 
-            .medicament {{
-                background: #f1f7ff;
-                border-left: 5px solid #1f3c88;
-                padding: 15px;
-                margin: 15px 0;
-                border-radius: 10px;
-            }}
-
-            .medicament h3 {{
-                margin-top: 0;
-                color: #1f3c88;
-            }}
-
-            hr {{
-                border: none;
-                border-top: 1px solid #ddd;
-                margin: 20px 0;
-            }}
-
-            .vide {{
-                text-align: center;
-                font-size: 18px;
-            }}
-
-            .retour {{
-                display: block;
-                width: 220px;
-                margin: 30px auto;
-                padding: 12px;
-                text-align: center;
-                background: #1f3c88;
+            .btn {{
+                display: inline-block;
+                margin-top: 20px;
+                padding: 13px 22px;
+                background: #174a6b;
                 color: white;
                 text-decoration: none;
-                border-radius: 8px;
+                border-radius: 9px;
+                font-weight: bold;
+            }}
+
+            .btn:hover {{
+                background: #123d59;
             }}
 
         </style>
@@ -1228,13 +2558,45 @@ def voir_ordonnances():
 
     <body>
 
-        <h1>📋 Ordonnances médicales</h1>
+        <div class="container">
 
-        {lignes}
+            <h1>
+                🔳 QR Code
+            </h1>
 
-        <a class="retour" href="/">
-            ← Retour à l'accueil
-        </a>
+            <h2>
+                Ordonnance #{ordonnance_id}
+            </h2>
+
+            <img
+                src="data:image/png;base64,{image_base64}"
+                alt="QR Code de l'ordonnance"
+            >
+
+            <p>
+                Scannez ce QR Code pour accéder
+                à l'ordonnance numérique.
+            </p>
+
+            <a
+                href="/ordonnance/{ordonnance_id}"
+                class="btn">
+
+                📋 Voir l'ordonnance
+
+            </a>
+
+            <br>
+
+            <a
+                href="/ordonnances"
+                class="btn">
+
+                ← Retour aux ordonnances
+
+            </a>
+
+        </div>
 
     </body>
 
